@@ -1,5 +1,6 @@
 """Extract plain text from each downloaded 10-K PDF into data/raw/text/."""
 from pathlib import Path
+
 from pypdf import PdfReader
 
 pdf_dir = Path("data/raw/pdfs")

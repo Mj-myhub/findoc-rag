@@ -1,5 +1,6 @@
 """Chunk all extracted filings and save to data/processed/chunks.parquet."""
 from pathlib import Path
+
 import pandas as pd
 
 from findoc_rag.config import SETTINGS

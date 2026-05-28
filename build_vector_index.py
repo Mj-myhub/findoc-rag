@@ -1,6 +1,6 @@
 """Build a persistent ChromaDB vector (meaning) index over the chunks, then test it."""
-import pandas as pd
 import chromadb
+import pandas as pd
 from chromadb.utils import embedding_functions
 
 from findoc_rag.config import SETTINGS
