@@ -1,13 +1,15 @@
-"""Answer generation.  [PHASE 2 — Week 6]
+"""Answer generation.  [PHASE 2 - Week 6]
 
 Sends the question plus retrieved chunks to an LLM and returns a grounded,
-cited answer — or an explicit abstention when the context is insufficient.
-Not yet implemented — see ROADMAP.md, Week 6.
+cited answer - or an explicit abstention when the context is insufficient.
 """
 
 from __future__ import annotations
 
-# The system prompt is the heart of this module. Refine it during Week 6.
+from groq import Groq
+
+from findoc_rag.config import GROQ_API_KEY, SETTINGS
+
 SYSTEM_PROMPT = """You are a financial-document assistant.
 Answer the user's question using ONLY the provided context passages.
 Rules:
@@ -17,12 +19,29 @@ Rules:
 - Do not use outside knowledge. Do not guess."""
 
 
-def generate_answer(question: str, chunks: list) -> dict:
-    """Generate a cited answer from retrieved chunks.
+def generate_answer(question: str, chunks: list, client: Groq | None = None) -> dict:
+    """Generate a cited answer from retrieved chunks."""
+    if client is None:
+        client = Groq(api_key=GROQ_API_KEY)
 
-    TODO (Week 6):
-      - Format the retrieved chunks (with their ids) into the prompt.
-      - Call the Groq API (model from config/settings.yaml, GROQ_API_KEY from .env).
-      - Return a dict: {"answer": str, "citations": list, "abstained": bool}.
-    """
-    raise NotImplementedError("Phase 2, Week 6 — implement generation. See ROADMAP.md")
+    context = "\n\n".join(
+        f"[{c['chunk_id']}] (from {c['doc_name']})\n{c['text']}" for c in chunks
+    )
+    user_prompt = f"Context passages:\n\n{context}\n\nQuestion: {question}"
+
+    gen = SETTINGS["generation"]
+    resp = client.chat.completions.create(
+        model=gen["model"],
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=gen["temperature"],
+        max_tokens=gen["max_tokens"],
+    )
+    answer = resp.choices[0].message.content.strip()
+
+    abstained = "cannot find this in the filings" in answer.lower()
+    citations = [c["chunk_id"] for c in chunks if c["chunk_id"] in answer]
+
+    return {"answer": answer, "citations": citations, "abstained": abstained}
