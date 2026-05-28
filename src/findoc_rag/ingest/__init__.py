@@ -1,0 +1,1 @@
+"""FinDocRAG: ingest module."""

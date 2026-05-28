@@ -1,0 +1,1 @@
+"""FinDocRAG: data module."""

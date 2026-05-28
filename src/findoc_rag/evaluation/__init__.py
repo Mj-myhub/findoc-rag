@@ -1,0 +1,1 @@
+"""FinDocRAG: evaluation module."""

@@ -1,0 +1,1 @@
+"""FinDocRAG: generate module."""
