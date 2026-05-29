@@ -13,8 +13,8 @@ data:
 # --- Settings used from Phase 2 onward ---
 
 chunking:
-  chunk_size: 800        # characters per chunk
-  chunk_overlap: 100     # overlap between consecutive chunks
+  chunk_size: 1500        # characters per chunk
+  chunk_overlap: 300     # overlap between consecutive chunks
 
 retrieval:
   top_k: 10              # candidates from each index before fusion
