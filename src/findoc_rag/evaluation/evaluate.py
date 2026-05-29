@@ -1,28 +1,38 @@
-"""Evaluation and benchmarking.  [PHASE 3 — Weeks 7-8]
-
-Scores both retrieval quality and answer quality against FinanceBench, and
-produces the ablation table reported in the README.
-Not yet implemented — see ROADMAP.md, Week 7.
-"""
+"""Evaluation: retrieval recall against FinanceBench gold evidence.  [PHASE 3]"""
 
 from __future__ import annotations
 
-
-def evaluate_retrieval(predictions: list, gold: list) -> dict:
-    """Compute retrieval metrics.
-
-    TODO (Week 7):
-      - Compute Recall@k, MRR, and nDCG@10.
-      - "Gold" is the FinanceBench evidence passage for each question.
-    """
-    raise NotImplementedError("Phase 3, Week 7 — implement retrieval metrics. See ROADMAP.md")
+import re
 
 
-def evaluate_answers(predictions: list, gold: list) -> dict:
-    """Compute answer-quality metrics.
+def _norm_tokens(text: str) -> set:
+    """Lowercase, drop commas (so 1,577 == 1577), split into word/number tokens."""
+    text = text.replace(",", "").lower()
+    return set(re.findall(r"[a-z0-9]+", text))
 
-    TODO (Week 7):
-      - Use RAGAS / DeepEval for faithfulness, answer relevancy, correctness.
-      - Compare predictions against FinanceBench gold answers.
-    """
-    raise NotImplementedError("Phase 3, Week 7 — implement answer metrics. See ROADMAP.md")
+
+def gold_evidence_text(evidence) -> str:
+    """Concatenate the gold evidence_text snippets for one question."""
+    if evidence is None:
+        return ""
+    parts = []
+    for e in evidence:
+        try:
+            t = e["evidence_text"]
+        except (KeyError, TypeError, IndexError):
+            t = None
+        if t:
+            parts.append(str(t))
+    return " ".join(parts)
+
+
+def best_overlap(gold_text: str, chunks: list) -> float:
+    """Highest fraction of gold tokens found in any single retrieved chunk."""
+    gold = _norm_tokens(gold_text)
+    if not gold:
+        return 0.0
+    best = 0.0
+    for c in chunks:
+        ct = _norm_tokens(c["text"])
+        best = max(best, len(gold & ct) / len(gold))
+    return best
