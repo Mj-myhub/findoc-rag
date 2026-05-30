@@ -1,42 +1,54 @@
-"""FastAPI service.  [PHASE 4 — Week 9]
+"""FastAPI app for FinDocRAG.  [PHASE 4 - Week 9]
 
-Exposes FinDocRAG as an HTTP API. Not yet implemented — see ROADMAP.md, Week 9.
-
-The FastAPI import is guarded so this file can be imported safely in earlier
-phases, before ``fastapi`` is installed. Once you reach Phase 4, uncomment the
-FastAPI block in requirements.txt and build out the endpoints below.
+Exposes one endpoint: POST /ask  -> grounded, cited answer (or abstention).
+The Retriever is loaded once at startup, not per request.
 """
 
 from __future__ import annotations
 
-try:
-    from fastapi import FastAPI
+from contextlib import asynccontextmanager
 
-    _FASTAPI_AVAILABLE = True
-except ImportError:  # FastAPI is a Phase 4 dependency.
-    _FASTAPI_AVAILABLE = False
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+from findoc_rag.generate.generator import generate_answer
+from findoc_rag.retrieval.retriever import Retriever
+
+state: dict = {}
 
 
-def create_app():
-    """Build and return the FastAPI application.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Loading retriever (this takes a few seconds)...")
+    state["retriever"] = Retriever()
+    print("Ready.")
+    yield
 
-    TODO (Week 9):
-      - GET  /healthz  -> simple liveness check, returns {"status": "ok"}.
-      - POST /query    -> accepts {"question": str}, runs retrieve + generate,
-                          returns the answer, citations, and retrieved chunks.
-      - Wire each request through Langfuse tracing (added in Week 8).
-    """
-    if not _FASTAPI_AVAILABLE:
-        raise RuntimeError(
-            "FastAPI is not installed. Uncomment the Phase 4 block in "
-            "requirements.txt and run: pip install -r requirements.txt"
-        )
 
-    app = FastAPI(title="FinDocRAG", version="0.1.0")
+app = FastAPI(title="FinDocRAG", lifespan=lifespan)
 
-    @app.get("/healthz")
-    def healthz() -> dict:
-        return {"status": "ok"}
 
-    # TODO (Week 9): add the POST /query endpoint here.
-    return app
+class AskRequest(BaseModel):
+    question: str
+    top_k: int = 10
+
+
+@app.get("/")
+def root() -> dict:
+    return {"status": "ok", "try": "POST /ask  body: {\"question\": \"...\"}  or open /docs"}
+
+
+@app.post("/ask")
+def ask(req: AskRequest) -> dict:
+    r = state["retriever"]
+    chunks = r.retrieve(req.question, top_k=req.top_k)
+    result = generate_answer(req.question, chunks)
+    return {
+        "question": req.question,
+        "answer": result["answer"],
+        "citations": result["citations"],
+        "abstained": result["abstained"],
+        "chunks": [
+            {"chunk_id": c["chunk_id"], "doc_name": c["doc_name"]} for c in chunks
+        ],
+    }
