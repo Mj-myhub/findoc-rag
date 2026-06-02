@@ -1,4 +1,4 @@
-"""Hybrid retrieval (BM25 + dense) + cross-encoder reranking.  [PHASE 2 - Week 5]"""
+"""Hybrid retrieval + reranking + LLM query expansion.  [v0.5.0]"""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import pickle
 
 import chromadb
 from chromadb.utils import embedding_functions
+from groq import Groq
 from sentence_transformers import CrossEncoder
 
-from findoc_rag.config import SETTINGS
+from findoc_rag.config import GROQ_API_KEY, SETTINGS
 
 
 def reciprocal_rank_fusion(rankings: list[list], k: int = 60) -> list:
-    """Merge ranked lists of ids with RRF: each item earns 1/(k+rank) per list."""
     scores: dict = {}
     for ranking in rankings:
         for rank, item in enumerate(ranking, start=1):
@@ -20,9 +20,31 @@ def reciprocal_rank_fusion(rankings: list[list], k: int = 60) -> list:
     return sorted(scores, key=scores.get, reverse=True)
 
 
-class Retriever:
-    """Loads indexes once; retrieves hybrid candidates and optionally reranks them."""
+_EXPAND_PROMPT = (
+    "You convert a finance question into the exact line-item terminology used "
+    "in SEC 10-K filings. For example 'capital expenditure' appears as "
+    "'Purchases of property, plant and equipment'; 'revenue' often appears as "
+    "'Net sales'. Reply with ONLY a short space-separated list of the most "
+    "likely filing terms for the question - no explanation, no punctuation."
+)
 
+
+def expand_query(question: str, client: Groq) -> str:
+    """Append likely 10-K line-item synonyms to a question to bridge vocab gaps."""
+    resp = client.chat.completions.create(
+        model=SETTINGS["generation"]["model"],
+        messages=[
+            {"role": "system", "content": _EXPAND_PROMPT},
+            {"role": "user", "content": question},
+        ],
+        temperature=0,
+        max_tokens=60,
+    )
+    extra = resp.choices[0].message.content.strip()
+    return f"{question} {extra}"
+
+
+class Retriever:
     def __init__(self) -> None:
         model_name = SETTINGS["retrieval"]["dense_model"]
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
@@ -38,13 +60,20 @@ class Retriever:
 
         self.rerank_model_name = SETTINGS["retrieval"]["rerank_model"]
         self.rerank_top_k = SETTINGS["retrieval"]["rerank_top_k"]
-        self._reranker = None  # loaded on first use (it is a biggish download)
+        self._reranker = None
+        self._groq = None
 
     @property
     def reranker(self) -> CrossEncoder:
         if self._reranker is None:
             self._reranker = CrossEncoder(self.rerank_model_name)
         return self._reranker
+
+    @property
+    def groq(self) -> Groq:
+        if self._groq is None:
+            self._groq = Groq(api_key=GROQ_API_KEY)
+        return self._groq
 
     def _as_record(self, chunk_id: str) -> dict:
         return {"chunk_id": chunk_id, "doc_name": self.doc_by_id.get(chunk_id, "?"),
@@ -58,14 +87,15 @@ class Retriever:
         top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         return [self.ids[i] for i in top]
 
-    def retrieve(self, question: str, top_k: int = 10, rerank: bool = True) -> list:
-        dense = self._vector_search(question, top_k)
-        sparse = self._bm25_search(question, top_k)
+    def retrieve(self, question: str, top_k: int = 10, rerank: bool = True,
+                 expand: bool = True) -> list:
+        search_query = expand_query(question, self.groq) if expand else question
+        dense = self._vector_search(search_query, top_k)
+        sparse = self._bm25_search(search_query, top_k)
         fused = [self._as_record(cid) for cid in reciprocal_rank_fusion([dense, sparse])]
         if not rerank:
             return fused
-        pairs = [(question, c["text"]) for c in fused]
-        scores = self.reranker.predict(pairs)
+        scores = self.reranker.predict([(question, c["text"]) for c in fused])
         for c, s in zip(fused, scores):
             c["rerank_score"] = float(s)
         fused.sort(key=lambda c: c["rerank_score"], reverse=True)

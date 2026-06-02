@@ -68,3 +68,46 @@ labels away from their values.
 - Query rewriting / vocabulary expansion ("capital expenditure" => "Purchases of property, plant and equipment").
 - Split recall by question type (descriptive vs numerical) for a precise breakdown.
 - Add answer-quality metrics (faithfulness, correctness) layered on top of retrieval recall.
+
+## v0.5.0 — Cracking the numerical-question failure (three-layer investigation)
+
+One question failed across *every* earlier experiment: the FY2018 capital
+expenditure for 3M (gold answer: $1,577M). Tracing it revealed three stacked
+root causes, each hiding the next.
+
+**Layer 1 - Ranking?** Growing the candidate pool (10 -> 30 -> 50) gave no lift
+(24.6% -> 24.6% -> 21.1%). Not a ranking-depth problem.
+
+**Layer 2 - Extraction.** grep showed pypdf scattered the row label
+("Purchases of property, plant and equipment") ~3 lines from its value
+"(1,577)". Table-aware extraction (pdfplumber) put them back on one line.
+Necessary, but on its own it did not fix the question, and table-row noise
+slightly lowered the keyword/hybrid scores:
+
+| Config | pypdf @1500 | pdfplumber @1500 |
+|---|---|---|
+| dense | 33.3% | 35.1% |
+| bm25 | 19.3% | 17.5% |
+| hybrid | 29.8% | 26.3% |
+| hybrid+rerank | 33.3% | 31.6% |
+
+**Layer 3 - Vocabulary (root cause).** Re-asking with the filing's own words
+("purchases of property, plant and equipment") returned $1,577 instantly. The
+question said "capital expenditure"; the filing never does. BM25 cannot match
+the synonyms and the embedder does not bridge them well enough to rank the row
+in the top 10.
+
+**Fix: LLM query expansion.** Before retrieval, the question is rewritten into
+likely 10-K line-item terminology, then searched with both. The original
+"capital expenditure" question now answers correctly (citing the pdfplumber
+table row), and Recall@10 improves across all 57 questions:
+
+| query expansion | Recall@10 | avg overlap |
+|---|---|---|
+| OFF | 31.6% | 0.44 |
+| ON  | 38.6% | 0.49 |
+
+**Takeaway.** The two fixes compound: table-aware extraction makes the value
+retrievable; query expansion makes it findable. End to end, hybrid+rerank
+Recall@10 rose from 24.6% (initial baseline) to 38.6%, and numerical/line-item
+questions that always abstained now answer with citations.
