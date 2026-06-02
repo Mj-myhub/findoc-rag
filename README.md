@@ -1,126 +1,90 @@
 # FinDocRAG
 
-**A Retrieval-Augmented Generation system for question answering over SEC 10-K filings.**
+Ask plain-English questions about SEC 10-K annual reports and get answers grounded in the filing text — with citations, or an honest "I cannot find this" when the answer isn't there.
 
-> Status: 🟡 In development — Phase 1 (Foundation). See [ROADMAP.md](ROADMAP.md) for the full build plan.
+A retrieval-augmented generation (RAG) system built from scratch over real financial filings, with a measured, honest evaluation.
 
----
+## What it does
 
-## The problem
+10-K filings run 100–200 pages of dense financial and legal text. FinDocRAG answers questions like *"What are AMD's main business risks?"* with a short response that cites the exact passages it used — and refuses to guess when the answer isn't in the filings.
 
-Company annual reports (SEC 10-K filings) routinely run 100–200+ pages. An analyst who needs
-one specific disclosure — a risk factor, a revenue figure, a segment note — has to read or
-keyword-hunt through the whole document. FinDocRAG lets a user **ask a question in plain English
-and get a grounded answer with a citation back to the exact passage** in the filing.
+> **Q:** What are the main business risks for AMD?
+> **A:** Intel's dominance of the microprocessor market; global economic uncertainty; reliance on external financing. *[cites AMD_2022_10K::57, ::60, ::6]*
 
-This is a recognised, high-value industrial use case: financial-document analysis is one of the
-most common enterprise applications of RAG, and dedicated commercial products exist for it.
+> **Q:** What is the capital of France?
+> **A:** I cannot find this in the filings.
 
-## What it does (target system)
+## How it works
 
-```
-        Question: "What are Apple's main supply-chain risks?"
-                              │
-                              ▼
-   ┌──────────────────────────────────────────────────────┐
-   │  1. Retrieve  →  BM25 + dense embeddings (hybrid)      │
-   │  2. Rerank    →  cross-encoder reranker                │
-   │  3. Generate  →  LLM answers ONLY from retrieved text  │
-   │  4. Cite      →  answer + source passage references    │
-   │  5. Abstain   →  says "not found" instead of guessing  │
-   └──────────────────────────────────────────────────────┘
-                              │
-                              ▼
-     Answer + citations  +  full request trace (Langfuse)
+```mermaid
+flowchart LR
+    Q[Question] --> B[BM25 keyword search]
+    Q --> D[Dense vector search]
+    B --> F[Reciprocal Rank Fusion]
+    D --> F
+    F --> R[Cross-encoder rerank]
+    R --> L[LLM: grounded, cited answer or abstain]
 ```
 
-Every component is **measured**: the system is evaluated against
-[FinanceBench](https://github.com/patronus-ai/financebench), an external benchmark of expert-written
-questions over real filings.
-
-## Tech stack
-
-| Layer          | Tools |
-|----------------|-------|
-| Language       | Python 3.10+ |
-| Retrieval      | `rank-bm25`, `sentence-transformers`, ChromaDB |
-| Reranking      | `BAAI/bge-reranker` cross-encoder |
-| Generation     | Groq API (free tier) — Llama 3.1 |
-| Evaluation     | RAGAS, DeepEval, FinanceBench |
-| Observability  | Langfuse |
-| Serving        | FastAPI + Streamlit |
-| Packaging      | Docker, GitHub Actions CI |
-
-## Quickstart
-
-```bash
-# 1. Clone and enter the project
-git clone https://github.com/Mj-myhub/findoc-rag.git
-cd findoc-rag
-
-# 2. (Recommended) create a virtual environment
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-# 3. Install
-make install            # or: pip install -r requirements.txt && pip install -e .
-
-# 4. Download the evaluation dataset
-make explore            # loads FinanceBench, saves a local copy, prints its structure
-
-# 5. Run the tests
-make test
-```
-
-## Day 1 checklist
-
-- [ ] Read this README and [ROADMAP.md](ROADMAP.md) end to end.
-- [ ] Create the GitHub repo `findoc-rag` and push this code to it.
-- [ ] Run `make install` successfully.
-- [ ] Run `make explore` — confirm `data/raw/financebench.parquet` is created.
-- [ ] Open `notebooks/01_explore_financebench.ipynb` and read through the dataset.
-- [ ] You should now be able to describe, in your own words, what FinanceBench contains.
+- **Chunking:** filings split into 1,500-character overlapping passages
+- **Keyword index:** BM25 (`rank-bm25`)
+- **Vector index:** `BAAI/bge-small-en-v1.5` embeddings in ChromaDB
+- **Fusion:** Reciprocal Rank Fusion merges both rankings
+- **Reranking:** `BAAI/bge-reranker-base` cross-encoder re-scores candidates
+- **Generation:** Groq `llama-3.1-8b-instant` with a strict cite-or-abstain prompt
+- **Interfaces:** FastAPI endpoint (`POST /ask`) and a Gradio web demo
 
 ## Results
 
-_To be filled in during Phase 3. The headline deliverable is an ablation table showing how much
-each component (hybrid retrieval, reranking) improves answer quality._
+Evaluated on 57 expert-written questions from [FinanceBench](https://github.com/patronus-ai/financebench) across a 15-filing slice. Metric: retrieval Recall@10 by gold-evidence overlap. Full methodology in [eval/RESULTS.md](eval/RESULTS.md).
 
-| Configuration            | Recall@10 | nDCG@10 | Faithfulness | Answer correctness |
-|--------------------------|-----------|---------|--------------|--------------------|
-| Dense retrieval only     | _TBD_     | _TBD_   | _TBD_        | _TBD_              |
-| BM25 only                | _TBD_     | _TBD_   | _TBD_        | _TBD_              |
-| Hybrid (BM25 + dense)    | _TBD_     | _TBD_   | _TBD_        | _TBD_              |
-| Hybrid + reranker        | _TBD_     | _TBD_   | _TBD_        | _TBD_              |
+| Configuration     | Recall@10 |
+|-------------------|-----------|
+| BM25 (keyword)    | 19.3%     |
+| Dense (meaning)   | 33.3%     |
+| Hybrid (RRF)      | 29.8%     |
+| Hybrid + reranker | **33.3%** |
 
-## Repository layout
+Increasing chunk size from 800 to 1,500 characters lifted the best configuration from 24.6% to 33.3% (+8.7 points).
 
+**Honest limitation:** retrieval is reliable on descriptive questions but weak on numerical questions that require reading financial-statement tables (e.g. capital expenditure), because PDF table extraction scatters row labels from their values. Documented, not hidden — see RESULTS.md.
+
+## Quickstart
+
+Requires Python 3.10+ and a free [Groq API key](https://console.groq.com).
+
+```bash
+# 1. Environment
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+
+# 2. Add your Groq key
+cp .env.example .env
+# edit .env and set GROQ_API_KEY=gsk_...
+
+# 3. Build data + indexes (downloads 15 filings; a few minutes)
+python3 get_pdfs.py
+python3 extract_text.py
+python3 make_chunks.py
+python3 build_vector_index.py
+python3 build_bm25_index.py
+
+# 4. Run the demo
+python3 demo.py     # Gradio UI at http://127.0.0.1:7860
 ```
-findoc-rag/
-├── README.md              ← you are here
-├── ROADMAP.md             ← the week-by-week build plan
-├── ARCHITECTURE.md        ← system design and rationale
-├── config/settings.yaml   ← all tunable settings
-├── src/findoc_rag/        ← the Python package
-│   ├── data/              ← dataset loading (Phase 1 — done)
-│   ├── ingest/            ← chunking (Phase 2)
-│   ├── index/             ← BM25 + vector index (Phase 2)
-│   ├── retrieval/         ← hybrid retrieval + reranking (Phase 2)
-│   ├── generate/          ← LLM answer generation (Phase 2)
-│   ├── evaluation/        ← metrics and benchmarking (Phase 3)
-│   └── api/               ← FastAPI service (Phase 4)
-├── notebooks/             ← exploration notebooks
-├── eval/                  ← evaluation results
-└── tests/                 ← automated tests
+
+Or run the API:
+
+```bash
+uvicorn findoc_rag.api.app:app
+# POST http://127.0.0.1:8000/ask  body: {"question": "..."}
 ```
 
-## License
+## Tech stack
 
-MIT — see [LICENSE](LICENSE).
+Python · sentence-transformers · ChromaDB · rank-bm25 · Groq · FastAPI · Gradio · pytest · ruff · GitHub Actions
 
-_FinanceBench is released by Patronus AI under its own license; review it before redistributing
-any derived data._
+## Status & future work
 
-## Disclaimer
-
-FinDocRAG is a portfolio and research project. It does **not** provide financial advice and
-should not be used for investment decisions.
+Complete through a working, evaluated, demoable system. Possible next steps: table-aware PDF extraction to fix numerical-question retrieval; answer-quality metrics (faithfulness, correctness); a permanently hosted demo.
