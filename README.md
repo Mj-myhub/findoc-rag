@@ -18,8 +18,9 @@ A retrieval-augmented generation (RAG) system built from scratch over real finan
 
 ```mermaid
 flowchart LR
-    Q[Question] --> B[BM25 keyword search]
-    Q --> D[Dense vector search]
+    Q[Question] --> E[LLM query expansion]
+    E --> B[BM25 keyword search]
+    E --> D[Dense vector search]
     B --> F[Reciprocal Rank Fusion]
     D --> F
     F --> R[Cross-encoder rerank]
@@ -27,6 +28,8 @@ flowchart LR
 ```
 
 - **Chunking:** filings split into 1,500-character overlapping passages
+- **Extraction:** table-aware PDF parsing (`pdfplumber`) keeps each table row's label next to its numbers
+- **Query expansion:** an LLM rewrites the question into the filing's own line-item wording before searching (e.g. "capital expenditure" → "purchases of property, plant and equipment")
 - **Keyword index:** BM25 (`rank-bm25`)
 - **Vector index:** `BAAI/bge-small-en-v1.5` embeddings in ChromaDB
 - **Fusion:** Reciprocal Rank Fusion merges both rankings
@@ -36,18 +39,22 @@ flowchart LR
 
 ## Results
 
-Evaluated on 57 expert-written questions from [FinanceBench](https://github.com/patronus-ai/financebench) across a 15-filing slice. Metric: retrieval Recall@10 by gold-evidence overlap. Full methodology in [eval/RESULTS.md](eval/RESULTS.md).
+Evaluated on 57 expert-written questions from [FinanceBench](https://github.com/patronus-ai/financebench) across a 15-filing slice. Metric: retrieval Recall@10 by gold-evidence overlap. Full methodology and the complete ablation are in [eval/RESULTS.md](eval/RESULTS.md).
+
+**Retrieval ablation** — why each architecture choice earns its place:
 
 | Configuration     | Recall@10 |
 |-------------------|-----------|
 | BM25 (keyword)    | 19.3%     |
 | Dense (meaning)   | 33.3%     |
 | Hybrid (RRF)      | 29.8%     |
-| Hybrid + reranker | **33.3%** |
+| Hybrid + reranker | 33.3%     |
 
-Increasing chunk size from 800 to 1,500 characters lifted the best configuration from 24.6% to 33.3% (+8.7 points).
+**Then two targeted improvements** attacked the system's hardest case — numerical questions that read financial-statement tables. Table-aware extraction made the values *retrievable*; query expansion made them *findable* across the question/filing vocabulary gap. Together they lifted the best configuration to **38.6%** Recall@10 and made previously-failing numerical questions (e.g. capital expenditure) answerable.
 
-**Honest limitation:** retrieval is reliable on descriptive questions but weak on numerical questions that require reading financial-statement tables (e.g. capital expenditure), because PDF table extraction scatters row labels from their values. Documented, not hidden — see RESULTS.md.
+The standout piece of work is the **three-layer debugging investigation** behind that gain — tracing one stubborn failure through ranking, then PDF extraction, then a question/filing vocabulary mismatch. The full write-up is in [eval/RESULTS.md](eval/RESULTS.md).
+
+**Honest note:** 38.6% is a real improvement, not a perfect score — some multi-table reasoning questions remain hard. The gap is measured and understood, not hidden.
 
 ## Quickstart
 
@@ -65,7 +72,7 @@ cp .env.example .env
 
 # 3. Build data + indexes (downloads 15 filings; a few minutes)
 python3 get_pdfs.py
-python3 extract_text.py
+python3 extract_text_v2.py      # table-aware extraction (pdfplumber)
 python3 make_chunks.py
 python3 build_vector_index.py
 python3 build_bm25_index.py
@@ -83,8 +90,8 @@ uvicorn findoc_rag.api.app:app
 
 ## Tech stack
 
-Python · sentence-transformers · ChromaDB · rank-bm25 · Groq · FastAPI · Gradio · pytest · ruff · GitHub Actions
+Python · sentence-transformers · ChromaDB · rank-bm25 · pdfplumber · Groq · FastAPI · Gradio · pytest · ruff · GitHub Actions
 
 ## Status & future work
 
-Complete through a working, evaluated, demoable system. Possible next steps: table-aware PDF extraction to fix numerical-question retrieval; answer-quality metrics (faithfulness, correctness); a permanently hosted demo.
+A complete, working, evaluated, demoable system. Possible next steps: answer-quality metrics (faithfulness, correctness); a permanently hosted demo (e.g. Hugging Face Spaces); extending the evaluation slice beyond 15 filings.
