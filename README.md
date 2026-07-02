@@ -34,7 +34,7 @@ flowchart LR
 - **Vector index:** `BAAI/bge-small-en-v1.5` embeddings in ChromaDB
 - **Fusion:** Reciprocal Rank Fusion merges both rankings
 - **Reranking:** `BAAI/bge-reranker-base` cross-encoder re-scores candidates
-- **Generation:** Groq `llama-3.1-8b-instant` with a strict cite-or-abstain prompt
+- **Generation:** Groq `openai/gpt-oss-20b` with a strict cite-or-abstain prompt
 - **Interfaces:** FastAPI endpoint (`POST /ask`) and a Gradio web demo
 
 ## Results

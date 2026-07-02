@@ -38,9 +38,10 @@ def expand_query(question: str, client: Groq) -> str:
             {"role": "user", "content": question},
         ],
         temperature=0,
-        max_tokens=60,
+        max_tokens=512,
+        reasoning_effort="low",
     )
-    extra = resp.choices[0].message.content.strip()
+    extra = (resp.choices[0].message.content or "").strip()
     return f"{question} {extra}"
 
 
