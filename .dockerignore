@@ -1,0 +1,15 @@
+.venv
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.DS_Store
+notebooks
+tests
+data/pdfs
+data/processed/chunks.parquet
+findoc-space
+*.md
+.env
