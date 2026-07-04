@@ -32,3 +32,8 @@ chroma/
 
 # OS
 .DS_Store
+
+# local HF Space duplicates
+findoc-space/data/
+findoc-space/src/
+*.save

@@ -15,7 +15,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy only the lock file first, so Docker can cache the (slow) install layer.
 COPY requirements-lock.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements-lock.txt
+    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements-lock.txt
 
 # ---- Stage 2: final runtime image ----
 FROM python:3.12-slim
